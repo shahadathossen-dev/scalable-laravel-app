@@ -6,7 +6,7 @@ services:
       - /etc/letsencrypt/live/test.shahadathossen.dev/fullchain.pem:/certs/fullchain.pem:ro
       - /etc/letsencrypt/live/test.shahadathossen.dev/privkey.pem:/certs/privkey.pem:ro
     ports:
-      - "8080:80"
+      - "80:80"
       - "443:443"
     dns:
       - 8.8.8.8
