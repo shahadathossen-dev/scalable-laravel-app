@@ -3,10 +3,10 @@ services:
     image: haproxy:3.2.3-alpine
     volumes:
       - .docker/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
-      - ../certs/fullchain.pem:/certs/fullchain.pem:ro
-      - ../certs/privkey.pem:/certs/privkey.pem:ro
+      - /etc/letsencrypt/live/test.shahadathossen.dev/fullchain.pem:/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/test.shahadathossen.dev/privkey.pem:/certs/privkey.pem:ro
     ports:
-      - "80:80"
+      - "8080:80"
       - "443:443"
     dns:
       - 8.8.8.8
