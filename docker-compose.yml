@@ -1,0 +1,240 @@
+services:
+  haproxy:
+    image: haproxy:3.2.3-alpine
+    volumes:
+      - .docker/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "8080:80"
+      - "443:443"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - appnet
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DB_CONNECTION: "${DB_CONNECTION}"
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT}"
+      DB_DATABASE: "${DB_DATABASE}"
+      DB_USERNAME: "${DB_USERNAME}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      REDIS_CLIENT: "${REDIS_CLIENT}"
+      REDIS_HOST: "${REDIS_HOST}"
+      REDIS_PORT: "${REDIS_PORT}"
+    volumes:
+      - ./:/var/www/html
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    healthcheck:
+      test: ["CMD-SHELL", "curl http://localhost:8000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      pgpool:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - appnet
+    restart: unless-stopped
+
+  node:
+    image: node:22-alpine
+    container_name: readback_node
+    user: node
+    working_dir: /assets
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./:/assets
+    command: npm run dev
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: unless-stopped
+
+  pgpool:
+    image: bitnami/pgpool:latest
+    container_name: readback_pgpool
+    ports:
+      - 5432:5432
+    environment:
+      - PGPOOL_BACKEND_NODES=0:pg-0:5432,1:pg-1:5432
+      - PGPOOL_SR_CHECK_USER=customuser
+      - PGPOOL_SR_CHECK_PASSWORD=custompassword
+      - PGPOOL_ENABLE_LDAP=no
+      - PGPOOL_POSTGRES_USERNAME=postgres
+      - PGPOOL_POSTGRES_PASSWORD=adminpassword
+      - PGPOOL_ADMIN_USERNAME=admin
+      - PGPOOL_ADMIN_PASSWORD=adminpassword
+    networks:
+      - appnet
+    depends_on:
+      pg-0:
+        condition: service_healthy
+      pg-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/opt/bitnami/scripts/pgpool/healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  pg-0:
+    image: bitnami/postgresql-repmgr:latest
+    container_name: readback_pg-0
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=adminpassword
+      - POSTGRESQL_USERNAME=customuser
+      - POSTGRESQL_PASSWORD=custompassword
+      - POSTGRESQL_DATABASE=customdatabase
+      - REPMGR_PASSWORD=repmgrpassword
+      - REPMGR_PRIMARY_HOST=pg-0
+      - REPMGR_PARTNER_NODES=pg-0,pg-1
+      - REPMGR_NODE_NAME=pg-0
+      - REPMGR_NODE_NETWORK_NAME=pg-0
+    volumes:
+      - pg_0_data:/bitnami/postgresql
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  pg-1:
+    image: bitnami/postgresql-repmgr:latest
+    volumes:
+      - pg_1_data:/bitnami/postgresql
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=adminpassword
+      - POSTGRESQL_USERNAME=customuser
+      - POSTGRESQL_PASSWORD=custompassword
+      - POSTGRESQL_DATABASE=customdatabase
+      - REPMGR_PASSWORD=repmgrpassword
+      - REPMGR_PRIMARY_HOST=pg-0
+      - REPMGR_PARTNER_NODES=pg-0,pg-1
+      - REPMGR_NODE_NAME=pg-1
+      - REPMGR_NODE_NETWORK_NAME=pg-1
+    container_name: readback_pg-1
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - appnet
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: readback_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD}"
+    depends_on:
+      pgpool:
+        condition: service_healthy
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin:/var/lib/pgadmin
+
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+    networks:
+      - appnet
+    volumes:
+      - redis:/data
+
+  horizon:
+    container_name: readback_horizon
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: "${REDIS_HOST}"
+      DB_HOST: "${DB_HOST}"
+    depends_on:
+      app:
+        condition: service_healthy
+      pgpool:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/var/www/html
+      - .env:/var/www/html/.env
+    command: php artisan horizon
+    restart: unless-stopped
+
+  scheduler:
+    container_name: readback_scheduler
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: "${REDIS_HOST}"
+      DB_HOST: "${DB_HOST}"
+    depends_on:
+      app:
+        condition: service_healthy
+      pgpool:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/var/www/html
+      - .env:/var/www/html/.env
+    command: php artisan schedule:work
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit
+    container_name: readback_mailpit
+    restart: always
+    ports:
+      - "8020:8025"
+      - "1020:1025"
+    volumes:
+      - mailpit:/data
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
+networks:
+  appnet:
+    driver: bridge
+
+volumes:
+  pgadmin:
+  mailpit:
+  pg_0_data:
+  pg_1_data:
+  redis:
