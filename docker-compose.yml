@@ -3,8 +3,7 @@ services:
     image: haproxy:3.2.3-alpine
     volumes:
       - .docker/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
-      - ../certs/fullchain.pem:/certs/fullchain.pem:ro
-      - ../certs/privkey.pem:/certs/privkey.pem:ro
+      - /var/lib/haproxy/certs/haproxy.pem:/certs/haproxy.pem:ro
     ports:
       - "80:80"
       - "443:443"
@@ -38,7 +37,7 @@ services:
       - 8.8.8.8
       - 1.1.1.1
     healthcheck:
-      test: ["CMD-SHELL", "curl http://localhost:8000 || exit 1"]
+      test: ["CMD-SHELL", "curl http://0.0.0.0:8000 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
